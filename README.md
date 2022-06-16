@@ -1,6 +1,22 @@
 
 # jirer
 
+## Quickstart
+
+Install using pip:
+
+```
+pip install git+https://github.com/lucasea777/jirer.git --user
+```
+
+Ensure that `~/.local/bin` is in PATH, otherwise add something like:
+
+```
+PATH=PATH:/home/$(whoami)/.local/bin
+```
+
+to `~/.zshrc` or `~/.bashrc`
+
 
 <div align="center">
 
@@ -21,18 +37,14 @@
 Basic jirerCLI
 
 
-* GitHub repo: <https://github.com/lucasea777/jirergit>
-* Documentation: <https://jirerreadthedocs.io>
+* GitHub repo: <https://github.com/lucasea777/jirer.git>
+* Documentation: <https://jirer.readthedocs.io>
 * Free software: GNU General Public License v3
 
 
 ## Features
 
 * TODO
-
-## Quickstart
-
-TODO
 
 ## Credits
 
