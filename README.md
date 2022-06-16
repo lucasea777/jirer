@@ -41,6 +41,8 @@ $ jirer sprint  --help # display a nice table with the tasks
 $ jirer transition  --help # transition an issue given the id (e.g. from progress to CR)
 ```
 
+The first time you run either of the commands it will ask for the atlassian credentials, which will then be stored at `~/.jirer-console-config`
+
 ### Handy aliases
 
 you can then add aliases like:
