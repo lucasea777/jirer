@@ -1,4 +1,4 @@
-"""Tests for `jirer`.cli module."""
+"""Tests for `jirer`.main module."""
 from typing import List
 
 import pytest
@@ -11,15 +11,15 @@ from jirer import cli
 @pytest.mark.parametrize(
     "options,expected",
     [
-        # ([], "jirer.cli.main"),
-        (["--help"], "Usage: cli [OPTIONS]"),
-        (["--version"], f"cli, version { jirer.__version__ }\n"),
+        # ([], "jirer.main.main"),
+        (["--help"], "Usage: main [OPTIONS]"),
+        (["--version"], f"main, version { jirer.__version__ }\n"),
     ],
 )
 def test_command_line_interface(options: List[str], expected: str) -> None:
-    """Test the CLI."""
+    """Test the main."""
     runner = CliRunner()
-    result = runner.invoke(cli.cli, options)
+    result = runner.invoke(cli.main, options)
     assert result.exit_code == 0
     print(result.output)
     assert expected in result.output
