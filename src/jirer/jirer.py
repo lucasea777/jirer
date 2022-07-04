@@ -1,5 +1,18 @@
+# import sys
+# # from IPython.core import ultratb
+# # sys.excepthook = ultratb.FormattedTB(mode='Verbose',
+# #      color_scheme='Linux', call_pdb=1)
+# import os
+# os.environ['PYTHONBREAKPOINT'] = 'ipdb.set_trace'
+# # import debugpy
+
+# # debugpy.listen(5678)
+# # print("Waiting for debugger attach")
+# # debugpy.wait_for_client()
+
 from dataclasses import dataclass
 from dataclasses import asdict
+import subprocess
 import sys
 
 from pathlib import Path
@@ -13,18 +26,44 @@ CONFIG_PATH = Path("~/.jirer-console-config").expanduser()
 AUTH_PATH = CONFIG_PATH / "atlassian_api_key.json"
 CACHE = CONFIG_PATH / "raw.json"
 
+
+def deep_get(dictionary, key):
+    """
+    >>> deep_get({"a": {"b": 3}}, "a")
+    {"a": {"b": 3}}
+    >>> deep_get({"a": {"b": 3}}, "a.b")
+    3
+    >>> deep_get({"a": {"b": 3}}, "c")
+    >>> deep_get({"a": {"b": 3}}, "a.c")
+    >>> deep_get({"a": {"b": {"c": 4}}}, "a.b")
+    {"c": 4}
+    >>> deep_get({"a": {"b": {"c": 4}}}, "a.b.c.s")
+    """
+    keylist = key.split(".")[::-1]
+    def _deep_get(dictionary, keylist):
+        if keylist:
+            _next = keylist.pop()
+            item = dictionary.get(_next, None)
+            if keylist and type(item) == dict:
+                return _deep_get(item, keylist)
+            if not keylist:                    
+                return item
+    return _deep_get(dictionary, keylist) or ""
+
+
 def get_points(raw_issue):
     """
     The points field is custom and depends on the jirer configuration, to find it you can call '$ jirer.py sprint --fetch --json'
     """
-    if raw_issue["fields"].get("customfield_10008"):
-        return str(int(raw_issue["fields"]["customfield_10008"]))
+    if deep_get(raw_issue, "fields.customfield_10008"):
+        return str(int(deep_get(raw_issue, "fields.customfield_10008")))
     else:
-        return "customfield_10008 not available"
+        return ""
 
-def render(assignee, data, domain):
+def render(assignee, data, domain, use_pager):
     table = Table(title=assignee, show_lines=True)
 
+    table.add_column("Name", justify="right", style="cyan", no_wrap=True)
     table.add_column("Status", justify="right", style="cyan", no_wrap=True)
     table.add_column("Id", style="magenta")
     table.add_column("Points", justify="right", style="green")
@@ -32,6 +71,7 @@ def render(assignee, data, domain):
 
     for row in data:
         table.add_row(
+            row["name"],
             row["status"], 
             row["id"], 
             row["points"],
@@ -39,7 +79,11 @@ def render(assignee, data, domain):
             + (row["description"] or "")
             + "\n" + f"https://{domain}/browse/" + row["id"])
     console = Console()
-    console.print(table)
+    if use_pager:
+        with console.pager(styles=True):
+            console.print(table)
+    else:
+        console.print(table)
 
 @dataclass
 class Config:
@@ -104,22 +148,28 @@ class Jirer:
         ).json()
 
     @staticmethod
-    def extract(raw, assignee=None):
+    def extract(raw):
         records = [{
-            "name": r["fields"]["assignee"]["displayName"],
-            "email": r["fields"]["assignee"].get("emailAddress"),
+            "name": deep_get(r, "fields.assignee.displayName"),
+            "email": deep_get(r, "fields.assignee.emailAddress"),
             "id": r["key"],
-            "description": r["fields"]["description"],
-            "status": r["fields"]["status"]["name"],
-            "summary": r["fields"]["summary"],
-            "type": r["fields"]["issuetype"]["name"],
+            "description": deep_get(r, "fields.description"),
+            "status": deep_get(r, "fields.status.name"),
+            "summary": deep_get(r, "fields.summary"),
+            "type": deep_get(r, "fields.issuetype.name"),
             "points": get_points(r)
         } for r in raw["issues"]]
-        if not assignee:
-            return records
+        return records
+
+    @staticmethod
+    def get_assignees(records):
+        return [r["name"] for r in records]
+
+    @staticmethod
+    def filter_assignee(records, assignee):
         return [
-            {k: v for k, v in r.items() if k not in {"name", "email"}} 
-            for r in records if assignee.lower() in r["name"].lower()]
+            {k: v for k, v in r.items()} 
+            for r in records if assignee.lower() in (r["name"] or "").lower()]
 
     def get_transitions(self, issue):
         raws = requests.get(
@@ -140,8 +190,7 @@ class Jirer:
         if r.status_code != 204:
             raise Exception(f"not {r.status_code}!=204 {r.text}")
 
-    def sprint(self, assignee, fetch, output_json):
-        assignee = assignee or self.config.default_assignee
+    def sprint(self, assignee, select_assignee, show_all, fetch, output_json, use_pager):
         # import IPython; IPython.embed(colors="neutral")
         if fetch or not Path(CACHE).exists():
             raw = self.get_raw()
@@ -151,8 +200,30 @@ class Jirer:
         if output_json:
             print(json.dumps(raw))
             sys.exit()
-        data = self.extract(raw, assignee=assignee)
-        render(assignee, data, self.config.domain)
+        data = self.extract(raw)
+        if select_assignee:
+            candidates = self.get_assignees(data)
+            assignee = self.ask_choose_assignee(candidates)
+        if not show_all:
+            assignee = assignee or self.config.default_assignee
+        data = self.filter_assignee(data, assignee or "")
+        render(assignee, data, self.config.domain, use_pager)
+
+    def ask_choose_assignee(self, candidates):
+        candidates = list(set(candidates))
+        try:
+            assignee = subprocess.run(
+                    "fzf",
+                    input=bytes("\n".join(candidates), "utf8"), 
+                    stdout=subprocess.PIPE
+                ).stdout.decode().strip()
+        except FileNotFoundError:
+            raise Exception(
+                "To choose an assignee (as opposed to --show-all or passing one with --assignee) you need fzf.\n"
+                "Install it like so: \"brew/apt install fzf\"."
+            )
+        
+        return assignee
 
 
     def transition(self, issue, name=None):
